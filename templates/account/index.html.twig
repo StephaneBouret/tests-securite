@@ -1,0 +1,33 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Mon compte{% endblock %}
+
+{% block body %}
+    <section class="page-header">
+        <p class="eyebrow">Route protégée par ROLE_USER</p>
+        <h1>Mon compte</h1>
+        <p><strong>{{ app.user.firstname }}</strong> - {{ app.user.userIdentifier }}</p>
+    </section>
+
+    <div class="two-columns">
+        <section class="panel">
+            <h2>Modifier le profil</h2>
+            <p>Le formulaire Symfony utilise sa protection CSRF automatique.</p>
+            <a class="button" href="{{ path('app_account_edit') }}">Ouvrir le formulaire</a>
+        </section>
+
+        <section class="panel panel-danger">
+            <h2>Supprimer le compte</h2>
+            <p>Cette action illustre une vérification CSRF manuelle liée à l'identifiant utilisateur.</p>
+
+            <form method="post" action="{{ path('app_account_delete') }}">
+                <input
+                    type="hidden"
+                    name="_token"
+                    value="{{ csrf_token('delete-account-' ~ app.user.id) }}"
+                >
+                <button class="button button-danger" type="submit">Supprimer définitivement</button>
+            </form>
+        </section>
+    </div>
+{% endblock %}

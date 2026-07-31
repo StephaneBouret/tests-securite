@@ -1,0 +1,23 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Contact protégé{% endblock %}
+
+{% block body %}
+    <section class="form-page">
+        <p class="eyebrow">Honeypot, question de sécurité et RateLimiter</p>
+        <h1>Contact protégé</h1>
+        <p>
+            Le champ <code>contact[website]</code> doit rester vide. La sixième
+            soumission effectuée en moins d'une minute depuis la même adresse IP
+            reçoit une réponse <code>429 Too Many Requests</code>. La question
+            « 3 + 4 » illustre les tests CAPTCHA valide et invalide sans dépendre
+            d'un service tiers.
+        </p>
+
+        {{ form_start(contactForm, {attr: {novalidate: 'novalidate'}}) }}
+            {{ form_errors(contactForm) }}
+            {{ form_widget(contactForm) }}
+            <button class="button" type="submit">Envoyer</button>
+        {{ form_end(contactForm) }}
+    </section>
+{% endblock %}

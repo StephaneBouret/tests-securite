@@ -1,0 +1,20 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Enregistrement{% endblock %}
+
+{% block body %}
+    <section class="form-page">
+        <p class="eyebrow">Validation côté serveur</p>
+        <h1>Inscription</h1>
+        <p>Le navigateur est volontairement privé de validation HTML pour faciliter les exercices.</p>
+
+        {{ form_start(registrationForm, {attr: {novalidate: 'novalidate'}}) }}
+        {{ form_errors(registrationForm) }}
+        {{ form_row(registrationForm.email) }}
+        {{ form_row(registrationForm.plainPassword) }}
+        {{ form_row(registrationForm.firstname) }}
+
+            <button class="button" type="submit">Créer un compte</button>
+        {{ form_end(registrationForm) }}
+    </section>
+{% endblock %}

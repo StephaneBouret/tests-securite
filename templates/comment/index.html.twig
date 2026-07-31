@@ -1,0 +1,43 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Commentaires et XSS{% endblock %}
+
+{% block body %}
+    <section class="page-header">
+        <p class="eyebrow">Exercice XSS</p>
+        <h1>Commentaires</h1>
+        <p>
+            Essayez <code>&lt;script&gt;alert('hack')&lt;/script&gt;</code> :
+            Twig doit l'afficher comme du texte et ne jamais l'exécuter.
+        </p>
+    </section>
+
+    <div class="two-columns two-columns-wide">
+        <section class="panel">
+            <h2>Ajouter un commentaire</h2>
+            {{ form_start(commentForm, {attr: {novalidate: 'novalidate'}}) }}
+                {{ form_errors(commentForm) }}
+                {{ form_widget(commentForm) }}
+                <button class="button" type="submit">Publier</button>
+            {{ form_end(commentForm) }}
+        </section>
+
+        <section class="panel">
+            <h2>Contenu enregistré</h2>
+
+            <div class="comment-list">
+                {% for comment in comments %}
+                    <article class="comment">
+                        <div class="comment-meta">
+                            {{ comment.author.firstname }} -
+                            {{ comment.createdAt|date('d/m/Y H:i') }}
+                        </div>
+                        <p>{{ comment.content }}</p>
+                    </article>
+                {% else %}
+                    <p>Aucun commentaire.</p>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+{% endblock %}

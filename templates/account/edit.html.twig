@@ -1,0 +1,16 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Modifier mon compte{% endblock %}
+
+{% block body %}
+    <section class="form-page">
+        <p class="eyebrow">CSRF automatique</p>
+        <h1>Modifier mon compte</h1>
+
+        {{ form_start(accountForm, {attr: {novalidate: 'novalidate'}}) }}
+            {{ form_errors(accountForm) }}
+            {{ form_widget(accountForm) }}
+            <button class="button" type="submit">Enregistrer</button>
+        {{ form_end(accountForm) }}
+    </section>
+{% endblock %}

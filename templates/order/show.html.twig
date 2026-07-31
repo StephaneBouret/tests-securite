@@ -1,0 +1,29 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Commande {{ order.reference }}{% endblock %}
+
+{% block body %}
+    <section class="page-header">
+        <p class="eyebrow">Ressource protégée par un Voter</p>
+        <h1>Commande {{ order.reference }}</h1>
+        <p>
+            Cette page n'est accessible qu'au propriétaire de la commande
+            ou à un administrateur.
+        </p>
+    </section>
+
+    <dl class="definition-list panel">
+        <div>
+            <dt>Propriétaire</dt>
+            <dd>{{ order.owner.firstname }}</dd>
+        </div>
+        <div>
+            <dt>Description</dt>
+            <dd>{{ order.description }}</dd>
+        </div>
+        <div>
+            <dt>Total</dt>
+            <dd>{{ (order.totalCents / 100)|number_format(2, ',', ' ') }} €</dd>
+        </div>
+    </dl>
+{% endblock %}

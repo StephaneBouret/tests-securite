@@ -1,0 +1,14 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Administration{% endblock %}
+
+{% block body %}
+    <section class="page-header">
+        <p class="eyebrow">Route protégée par ROLE_ADMIN</p>
+        <h1>Administration</h1>
+        <p>
+            Si vous voyez cet écran, l'Access Control et l'attribut
+            <code>IsGranted</code> ont tous les deux validé votre rôle.
+        </p>
+    </section>
+{% endblock %}

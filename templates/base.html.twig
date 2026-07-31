@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
     <head>
         <meta charset="UTF-8">
-        <title>{% block title %}Welcome!{% endblock %}</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>⚫️</text><text y=%221.3em%22 x=%220.2em%22 font-size=%2276%22 fill=%22%23fff%22>sf</text></svg>">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block title %}Tests de sécurité Symfony{% endblock %}</title>
+        <meta name="description" content="Application pédagogique consacrée aux tests de sécurité avec Symfony et PHPUnit.">
         {% block stylesheets %}
         {% endblock %}
 
@@ -11,14 +12,54 @@
             {% block importmap %}{{ importmap('app') }}{% endblock %}
         {% endblock %}
 
-        {% set frankenphp_hot_reload = app.request.server.get('FRANKENPHP_HOT_RELOAD') %}
-        {% if frankenphp_hot_reload %}
-        <meta name="frankenphp-hot-reload:url" content="{{ frankenphp_hot_reload }}">
+        {% set frankenphpHotReload = app.request.server.get('FRANKENPHP_HOT_RELOAD') %}
+        {% if frankenphpHotReload %}
+        <meta name="frankenphp-hot-reload:url" content="{{ frankenphpHotReload }}">
         <script src="https://cdn.jsdelivr.net/npm/idiomorph"></script>
         <script src="https://cdn.jsdelivr.net/npm/frankenphp-hot-reload/+esm" type="module"></script>
         {% endif %}
     </head>
     <body>
-        {% block body %}{% endblock %}
+        <header class="site-header">
+            <nav class="container navigation" aria-label="Navigation principale">
+                <a class="brand" href="{{ path('app_home') }}">
+                    <span class="brand-mark" aria-hidden="true">S</span>
+                    <span>Tests sécurité</span>
+                </a>
+
+                <div class="nav-links">
+                    <a href="{{ path('app_contact') }}">Contact protégé</a>
+
+                    {% if app.user %}
+                        <a href="{{ path('app_dashboard') }}">Dashboard</a>
+                        <a href="{{ path('app_account') }}">Mon compte</a>
+                        <a href="{{ path('app_comments') }}">Commentaires</a>
+
+                        {% if is_granted('ROLE_ADMIN') %}
+                            <a href="{{ path('app_admin') }}">Administration</a>
+                        {% endif %}
+
+                        <a href="{{ path('app_logout') }}">Déconnexion</a>
+                    {% else %}
+                        <a href="{{ path('app_register') }}">Inscription</a>
+                        <a class="button button-small" href="{{ path('app_login') }}">Connexion</a>
+                    {% endif %}
+                </div>
+            </nav>
+        </header>
+
+        <main class="container">
+            {% for message in app.flashes('success') %}
+                <div class="flash flash-success" role="status">{{ message }}</div>
+            {% endfor %}
+
+            {% block body %}{% endblock %}
+        </main>
+
+        <footer class="site-footer">
+            <div class="container">
+                Application pédagogique - Symfony 8.1, PHP 8.4 et PHPUnit 13.
+            </div>
+        </footer>
     </body>
 </html>

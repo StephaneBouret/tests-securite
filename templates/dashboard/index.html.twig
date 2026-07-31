@@ -1,0 +1,36 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block body %}
+    <section class="page-header">
+        <p class="eyebrow">Route protégée par ROLE_USER</p>
+        <h1>Dashboard</h1>
+        <p>Bienvenue {{ app.user.firstname }}. Un visiteur anonyme est redirigé vers la connexion.</p>
+    </section>
+
+    <section class="panel">
+        <div class="section-heading">
+            <p class="eyebrow">Exercice IDOR</p>
+            <h2>Vos commandes</h2>
+        </div>
+
+        {% if orders is empty %}
+            <p>Vous n'avez aucune commande.</p>
+        {% else %}
+            <ul class="resource-list">
+                {% for order in orders %}
+                    <li>
+                        <div>
+                            <strong>{{ order.reference }}</strong>
+                            <span>{{ order.description }}</span>
+                        </div>
+                        <a class="button button-small" href="{{ path('app_order_show', {id: order.id}) }}">
+                            Consulter
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </section>
+{% endblock %}
