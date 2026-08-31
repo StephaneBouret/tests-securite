@@ -6,6 +6,7 @@ use App\Entity\User;
 use App\Form\AccountType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -46,7 +47,7 @@ class AccountController extends AbstractController
     }
 
     #[Route('/account/delete', name: 'app_account_delete', methods: ['POST'])]
-    public function delete(Request $request, EntityManagerInterface $entityManager): Response
+    public function delete(Request $request, EntityManagerInterface $entityManager, Security $security): Response
     {
         $user = $this->getUser();
         if (!$user instanceof User) {
@@ -62,8 +63,9 @@ class AccountController extends AbstractController
 
         $entityManager->remove($user);
         $entityManager->flush();
-        $request->getSession()->invalidate();
 
-        return $this->redirectToRoute('app_home');
+        $response = $security->logout(false);
+
+        return $response ?? $this->redirectToRoute('app_home');
     }
 }
