@@ -114,10 +114,10 @@ git --version
 
 ### 1. Récupérer le projet
 
-Depuis un futur dépôt Git :
+Depuis GitHub :
 
 ```bash
-git clone <URL_DU_DEPOT> tests-securite
+git clone https://github.com/StephaneBouret/tests-securite.git
 cd tests-securite
 ```
 
@@ -239,7 +239,7 @@ Uniquement les tests de sécurité :
 php bin/phpunit tests/Security
 ```
 
-Un chapitre précis :
+Une classe de tests précise :
 
 ```bash
 php bin/phpunit tests/Security/AccessControlTest.php
@@ -248,6 +248,12 @@ php bin/phpunit tests/Security/CsrfProtectionTest.php
 php bin/phpunit tests/Security/VulnerabilityTest.php
 php bin/phpunit tests/Security/AttackResistanceTest.php
 php bin/phpunit tests/Security/SecurityRegressionTest.php
+```
+
+Uniquement le groupe des tests de régression :
+
+```bash
+php bin/phpunit --group security-regression
 ```
 
 Un test précis :
@@ -270,8 +276,9 @@ php bin/phpunit --testdox tests/Security
 2. Se connecter avec Bob et ouvrir `/admin`.
 3. Se connecter avec Georges et ouvrir `/admin`.
 4. Exécuter `AccessControlTest.php`.
-5. Commenter temporairement une règle de `security.yaml` et observer le test de
-   régression échouer.
+5. Repérer les deux protections complémentaires de `/admin` : la règle
+   `access_control` dans `security.yaml` et l'attribut `#[IsGranted('ROLE_ADMIN')]`
+   dans `AdminController.php`.
 
 ### TP 2 - Falsifier une donnée
 
@@ -314,15 +321,73 @@ Exemple JSON :
 4. Observer la réponse `429` et l'en-tête `Retry-After`.
 5. Échouer plusieurs connexions et observer le `login_throttling`.
 
+### TP 6 - Tester les régressions de sécurité
+
+Un test de non-régression garantit qu'une protection déjà validée reste active
+après une correction, un refactoring ou une mise à jour. Techniquement, il
+s'agit d'un test PHPUnit ordinaire conservé comme preuve d'un comportement de
+sécurité attendu.
+
+1. Exécuter les tests de régression avec un affichage détaillé :
+
+   ```bash
+   php bin/phpunit --testdox --group security-regression
+   ```
+
+2. Identifier le contrat de sécurité vérifié par chacun des six tests :
+
+   - l'utilisateur anonyme est redirigé lorsqu'il demande `/admin` ;
+   - l'utilisateur standard reçoit une réponse `403` sur `/admin` ;
+   - l'administrateur peut toujours accéder à `/admin` ;
+   - le propriétaire peut consulter sa propre commande ;
+   - un utilisateur ne peut pas consulter la commande d'un autre utilisateur ;
+   - une suppression sans token CSRF est refusée et le compte est conservé.
+
+3. Dans `PurchaseOrderVoter.php`, remplacer temporairement :
+
+   ```php
+   return $subject->getOwner()?->getId() === $user->getId();
+   ```
+
+   par :
+
+   ```php
+   return $subject->getOwner()?->getId() !== $user->getId();
+   ```
+
+4. Relancer le groupe et observer l'échec des deux tests portant sur le
+   propriétaire et l'IDOR.
+5. Expliquer pourquoi l'inversion rend la commande du propriétaire inaccessible
+   tout en autorisant celle d'un autre utilisateur.
+6. Restaurer immédiatement la comparaison stricte avec `===`, sans commiter la
+   modification volontairement vulnérable.
+7. Relancer le groupe, puis l'ensemble de la suite :
+
+   ```bash
+   php bin/phpunit --group security-regression
+   php bin/phpunit
+   ```
+
+8. Étudier enfin `testManualActionAcceptsValidCsrfToken()` dans
+   `CsrfProtectionTest.php`. Ce test empêche le retour du bug où le compte était
+   supprimé, mais où l'ancien utilisateur restait présent dans le token de
+   sécurité pendant la redirection.
+
 ## Arborescence utile
 
 ```text
 tests-securite/
-├── .github/workflows/tests.yaml
-├── config/packages/
-│   ├── csrf.yaml
-│   ├── framework.yaml
-│   └── security.yaml
+├── .env.test
+├── composer.json
+├── phpunit.dist.xml
+├── assets/
+├── config/
+│   ├── packages/
+│   │   ├── csrf.yaml
+│   │   ├── framework.yaml
+│   │   ├── rate_limiter.yaml
+│   │   └── security.yaml
+│   └── routes/
 ├── migrations/
 ├── src/
 │   ├── Controller/
@@ -331,38 +396,29 @@ tests-securite/
 │   │   ├── CommentController.php
 │   │   ├── ContactController.php
 │   │   └── PurchaseOrderController.php
+│   ├── DataFixtures/AppFixtures.php
 │   ├── Entity/
 │   │   ├── Comment.php
 │   │   ├── PurchaseOrder.php
 │   │   └── User.php
 │   ├── Form/
 │   ├── Model/
+│   ├── Repository/
 │   └── Security/Voter/PurchaseOrderVoter.php
+├── templates/
 └── tests/
-    ├── Controller/
+    ├── Controller/LogoutControllerTest.php
     ├── Security/
     │   ├── AccessControlTest.php
     │   ├── AttackResistanceTest.php
     │   ├── CsrfProtectionTest.php
     │   ├── InputValidationTest.php
     │   ├── SecurityRegressionTest.php
+    │   ├── UserEntityTest.php
     │   └── VulnerabilityTest.php
-    └── Support/CreatesUsers.php
+    ├── Support/CreatesUsers.php
+    └── bootstrap.php
 ```
-
-## Intégration continue
-
-Le workflow `.github/workflows/tests.yaml` :
-
-1. démarre MySQL 8.4 ;
-2. installe PHP 8.4 et Composer ;
-3. crée la base de test ;
-4. exécute les migrations et les fixtures ;
-5. vérifie le conteneur Symfony ;
-6. lance PHPUnit.
-
-Il s'exécute à chaque `push` et chaque Pull Request. Une protection supprimée
-par mégarde bloque ainsi le pipeline avant le déploiement.
 
 ## Points d'attention
 
