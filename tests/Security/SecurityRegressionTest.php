@@ -123,7 +123,7 @@ class SecurityRegressionTest extends WebTestCase
             '/orders/' . $foreignOrder->getId()
         );
 
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
     }
 
     /**
@@ -152,5 +152,71 @@ class SecurityRegressionTest extends WebTestCase
             ->findOneBy(['email' => $email]);
 
         self::assertNotNull($userAfterRequest);
+    }
+
+    public function testForeignAndMissingOrdersReturnTheSamePublicPage(): void
+    {
+        // Examiner la page publique, sans les détails du mode debug.
+        $client = static::createClient(['debug' => false]);
+
+        $userRepository = static::getContainer()
+            ->get(UserRepository::class);
+
+        $orderRepository = static::getContainer()
+            ->get(PurchaseOrderRepository::class);
+
+        $bob = $userRepository->findOneBy([
+            'email' => 'user@test.fr',
+        ]);
+
+        $foreignOrder = $orderRepository->findOneBy([
+            'reference' => 'SEC-002',
+        ]);
+
+        self::assertNotNull($bob);
+        self::assertNotNull($foreignOrder);
+        self::assertNotNull($foreignOrder->getOwner());
+
+        self::assertNotSame(
+            $bob->getId(),
+            $foreignOrder->getOwner()->getId()
+        );
+
+        // Choisir un identifiant absent du jeu de données de test.
+        $maximumId = $orderRepository->createQueryBuilder('o')
+            ->select('MAX(o.id)')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $missingId = (int) $maximumId + 1;
+
+        self::assertNull($orderRepository->find($missingId));
+
+        $client->loginUser($bob);
+
+        // Première demande : une commande existante appartient à autrui.
+        $client->request('GET', '/orders/' . $foreignOrder->getId());
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('h1', 'Page introuvable');
+
+        $foreignHtml = (string) $client->getResponse()->getContent();
+        $foreignContentType = $client->getResponse()
+            ->headers->get('Content-Type');
+
+        self::assertStringNotContainsString('SEC-002', $foreignHtml);
+
+        // Deuxième demande : une commande inexistante.
+        $client->request('GET', '/orders/' . $missingId);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('h1', 'Page introuvable');
+
+        $missingHtml = (string) $client->getResponse()->getContent();
+        $missingContentType = $client->getResponse()
+            ->headers->get('Content-Type');
+
+        self::assertSame($foreignContentType, $missingContentType);
+        self::assertSame($foreignHtml, $missingHtml);
     }
 }

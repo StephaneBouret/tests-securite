@@ -12,7 +12,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 class PurchaseOrderController extends AbstractController
 {
     #[Route('/orders/{id}', name: 'app_order_show', requirements: ['id' => '\d+'], methods: ['GET'])]
-    #[IsGranted(PurchaseOrderVoter::VIEW, 'order')]
+    #[IsGranted(PurchaseOrderVoter::VIEW, 'order', message: 'Page introuvable', statusCode: Response::HTTP_NOT_FOUND)]
     public function show(PurchaseOrder $order): Response
     {
         return $this->render('order/show.html.twig', [

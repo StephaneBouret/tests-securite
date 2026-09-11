@@ -33,7 +33,7 @@ tests de régression.
 | Protection CSRF | FormType automatique et suppression manuelle | `/account/edit`, `/account/delete` | `CsrfProtectionTest.php` |
 | Injection SQL | Charge utile envoyée au formulaire de connexion | `/login` | `VulnerabilityTest.php` |
 | XSS stocké | Commentaire malveillant échappé par Twig | `/comments` | `VulnerabilityTest.php` |
-| IDOR | Accès à la commande d'un autre utilisateur | `/orders/{id}` | `VulnerabilityTest.php` |
+| IDOR et énumération | Accès à la commande d'un autre utilisateur, puis masquage de son existence | `/orders/{id}` | `VulnerabilityTest.php`, `SecurityRegressionTest.php` |
 | Résistance | Honeypot, question CAPTCHA, RateLimiter et login throttling | `/contact`, `/login` | `AttackResistanceTest.php` |
 | Régression | Protections critiques conservées dans le temps | Routes sensibles | `SecurityRegressionTest.php` |
 
@@ -57,6 +57,65 @@ reste sécurisé :
 - Symfony valide les données côté serveur ;
 - les actions sensibles vérifient un token CSRF ;
 - le composant RateLimiter limite les comportements excessifs.
+
+### IDOR : du refus en 403 au masquage en 404
+
+Le parcours présente deux étapes successives. **Le code actuel correspond à
+la seconde étape : masquage en `404`.** Le `403` décrit le comportement initial
+étudié avant cette évolution, pas le résultat attendu de la version actuelle.
+
+| Demande avec la session de Bob | Étape initiale | Étape actuelle |
+| --- | --- | --- |
+| Sa propre commande | `200`, accès autorisé | `200`, accès autorisé |
+| La commande existante d'Alice | `403`, accès refusé | `404`, page générique |
+| Une commande inexistante | `404`, ressource absente | `404`, même page générique |
+
+À l'étape initiale, le Voter protège le contenu de la commande d'Alice, mais
+la différence entre `403` et `404` permet d'en déduire l'existence. Une petite
+boucle de requêtes sur des identifiants numériques peut révéler cet indice
+dans la plage explorée ; elle n'autorise pas la lecture des commandes.
+
+À l'étape actuelle, le Voter conserve sa règle : propriétaire ou administrateur.
+L'attribut `IsGranted` du contrôleur transforme le refus en `404` avec
+`statusCode: Response::HTTP_NOT_FOUND`. Le template commun se trouve dans :
+
+```text
+templates/bundles/TwigBundle/Exception/error404.html.twig
+```
+
+Pour comparer les véritables pages publiques dans le navigateur, définir dans
+`.env.local` :
+
+```dotenv
+APP_DEBUG=0
+```
+
+Une ligne commentée `# APP_DEBUG=0` dans `.env` ne désactive pas le debug.
+Vérifier également les variables d'environnement du processus et redémarrer
+le serveur local si nécessaire. Le mode debug peut afficher des détails
+d'exception différents malgré deux statuts `404`. Réactiver le debug après
+la démonstration si nécessaire pour poursuivre le développement.
+
+La règle `access_control` suivante exige la connexion avant la recherche de
+la commande :
+
+```yaml
+- { path: '^/orders(?:/|$)', roles: ROLE_USER }
+```
+
+Pour une URL `/orders/{id}` avec un identifiant numérique, un visiteur anonyme
+est ainsi redirigé vers `/login`, que la commande existe ou non. Après la
+connexion, le contrôle du Voter reste indispensable. Un administrateur peut
+toujours consulter une commande existante.
+
+Les réponses `403` de `/admin` pour un utilisateur standard et de la suppression
+de compte avec un jeton CSRF invalide restent inchangées.
+
+Le test `testForeignAndMissingOrdersReturnTheSamePublicPage()` désactive le
+debug et compare le statut `404`, le type de contenu et le HTML des deux
+réponses. Il vérifie aussi l'absence de la référence confidentielle `SEC-002`.
+Cette comparaison couvre ces réponses HTML ; elle ne démontre pas l'absence
+de tout indice temporel ou de toute divulgation par une autre route.
 
 ### Deux comportements CSRF à connaître
 
@@ -310,8 +369,25 @@ Exemple JSON :
 2. Publier `<script>alert("hack")</script>` dans `/comments`.
 3. Vérifier que le script est affiché comme du texte.
 4. Se connecter avec Bob et ouvrir sa commande `SEC-001`.
-5. Remplacer l'identifiant par celui de `SEC-002`.
-6. Constater la réponse `403`.
+5. Relever l'identifiant réel de `SEC-002` dans une session Alice séparée,
+   puis utiliser cette URL dans la session de Bob. Ne pas supposer que les
+   identifiants des commandes sont toujours `1` et `2`.
+6. Expliquer l'étape initiale : la commande d'Alice était refusée en `403`,
+   tandis qu'une commande absente renvoyait `404`. Ces réponses permettaient
+   de distinguer existence et absence lors d'une énumération bornée.
+7. Observer la version actuelle : la commande d'Alice renvoie désormais
+   `404`. Comparer avec un identifiant réellement absent, vérifié en base.
+8. Avec `APP_DEBUG=0`, vérifier que les deux réponses utilisent la même
+   page générique, sans données de la commande d'Alice. La prévisualisation
+   `/_error/404` seule ne suffit pas : demander les deux véritables URL.
+9. Si le script d'énumération initial est rejoué, interpréter maintenant `404`
+   comme « ressource inexistante ou non accessible ».
+10. Vérifier que Bob accède encore à sa commande et que Georges peut consulter
+    celle d'Alice. Le masquage ne doit pas bloquer les accès autorisés.
+
+Le TP 4 conserve sa numérotation dans ce README. Le support d'audit détaillé
+développe l'IDOR et l'énumération dans son TP1, puis la XSS et la CSRF dans
+ses TP2 et TP3.
 
 ### TP 5 - Tester la résistance
 
@@ -334,14 +410,16 @@ sécurité attendu.
    php bin/phpunit --testdox --group security-regression
    ```
 
-2. Identifier le contrat de sécurité vérifié par chacun des six tests :
+2. Identifier le contrat de sécurité vérifié par chacun des sept tests :
 
    - l'utilisateur anonyme est redirigé lorsqu'il demande `/admin` ;
    - l'utilisateur standard reçoit une réponse `403` sur `/admin` ;
    - l'administrateur peut toujours accéder à `/admin` ;
    - le propriétaire peut consulter sa propre commande ;
-   - un utilisateur ne peut pas consulter la commande d'un autre utilisateur ;
-   - une suppression sans token CSRF est refusée et le compte est conservé.
+   - un utilisateur reçoit désormais `404` pour la commande d'un autre utilisateur ;
+   - une suppression sans token CSRF est refusée et le compte est conservé ;
+   - une commande étrangère et une commande absente renvoient la même page
+     publique `404`, avec le même type de contenu et sans référence confidentielle.
 
 3. Dans `PurchaseOrderVoter.php`, remplacer temporairement :
 
@@ -355,8 +433,8 @@ sécurité attendu.
    return $subject->getOwner()?->getId() !== $user->getId();
    ```
 
-4. Relancer le groupe et observer l'échec des deux tests portant sur le
-   propriétaire et l'IDOR.
+4. Relancer le groupe et observer l'échec des trois tests portant sur le
+   propriétaire, l'IDOR et la comparaison des pages publiques.
 5. Expliquer pourquoi l'inversion rend la commande du propriétaire inaccessible
    tout en autorisant celle d'un autre utilisateur.
 6. Restaurer immédiatement la comparaison stricte avec `===`, sans commiter la
@@ -406,6 +484,7 @@ tests-securite/
 │   ├── Repository/
 │   └── Security/Voter/PurchaseOrderVoter.php
 ├── templates/
+│   └── bundles/TwigBundle/Exception/error404.html.twig
 └── tests/
     ├── Controller/LogoutControllerTest.php
     ├── Security/

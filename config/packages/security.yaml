@@ -41,6 +41,7 @@ security:
 
     # Note: Only the *first* matching rule is applied
     access_control:
+        - { path: '^/orders(?:/|$)', roles: ROLE_USER }
         - { path: ^/account, roles: ROLE_USER }
         - { path: ^/comments, roles: ROLE_USER }
         - { path: ^/dashboard, roles: ROLE_USER }
