@@ -39,7 +39,23 @@
                             <a href="{{ path('app_admin') }}">Administration</a>
                         {% endif %}
 
-                        <a href="{{ path('app_logout') }}">Déconnexion</a>
+                        {# <a href="{{ path('app_logout') }}">Déconnexion</a> #}
+                        <form
+                            id="logout-form"
+                            action="{{ path('app_logout') }}"
+                            method="post"
+                            data-turbo="false"
+                        >
+                            <input
+                                type="hidden"
+                                name="_token"
+                                value="{{ csrf_token('logout') }}"
+                            >
+
+                            <button class="button button-small" type="submit">
+                                Déconnexion
+                            </button>
+                        </form>
                     {% else %}
                         <a href="{{ path('app_register') }}">Inscription</a>
                         <a class="button button-small" href="{{ path('app_login') }}">Connexion</a>
