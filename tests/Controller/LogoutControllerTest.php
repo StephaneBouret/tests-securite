@@ -95,6 +95,43 @@ class LogoutControllerTest extends WebTestCase
         self::assertResponseRedirects('/login');
     }
 
+    public function testLogoutFromLoginPageWorks(): void
+    {
+        $client = $this->createAuthenticatedClient();
+
+        $crawler = $client->request(
+            'GET',
+            self::BASE_URL . '/login'
+        );
+
+        self::assertResponseIsSuccessful();
+
+        // Aucun lien ne doit proposer une déconnexion par GET
+        // y compris avec une URL absolue ou des paramètres
+        $logoutLinks = $crawler
+            ->filter('a[href]')
+            ->reduce(
+                static fn(
+                    \Symfony\Component\DomCrawler\Crawler $link
+                ): bool =>
+                parse_url($link->attr('href'), PHP_URL_PATH) === '/logout'
+            );
+
+        self::assertCount(0, $logoutLinks);
+
+        // Le formulaire de la navigation fonctionne depuis cette page.
+        $client->submit(
+            $crawler->filter('#logout-form')->form()
+        );
+
+        self::assertResponseRedirects('/');
+
+        // Vérifier l'effet réel de la déconnexion.
+        $client->request('GET', self::BASE_URL . '/account');
+
+        self::assertResponseRedirects('/login');
+    }
+
     private function createAuthenticatedClient(): KernelBrowser
     {
         $client = static::createClient();
