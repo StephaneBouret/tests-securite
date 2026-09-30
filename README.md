@@ -21,8 +21,13 @@ L'application ne cherche pas à simuler un pentest complet. Elle permet aux
 
 > Une fonctionnalité peut fonctionner parfaitement tout en étant mal sécurisée.
 
-Chaque mécanisme est donc accompagné de cas autorisés, de cas refusés et de
-tests de régression.
+Les exercices associent des cas autorisés, des cas refusés et des tests de
+régression. La solidité de leurs preuves varie : les tests de connexion avec
+charge SQL et des limiteurs restent notamment à renforcer.
+
+Les manipulations concernent uniquement l'application locale et des comptes de
+démonstration, dans un périmètre autorisé. Ce dépôt n'est ni un pentest exhaustif
+ni une certification de sécurité.
 
 ## Ce que l'application permet de tester
 
@@ -30,16 +35,18 @@ tests de régression.
 | --- | --- | --- | --- |
 | Accès utilisateurs | Anonyme, utilisateur et administrateur | `/account`, `/dashboard`, `/admin` | `AccessControlTest.php` |
 | Validation des entrées | Entité, formulaire, champ forgé et API JSON | `/register`, `/api/register` | `InputValidationTest.php` |
-| Protection CSRF | FormType automatique et suppression manuelle | `/account/edit`, `/account/delete` | `CsrfProtectionTest.php` |
-| Injection SQL | Charge utile envoyée au formulaire de connexion | `/login` | `VulnerabilityTest.php` |
-| XSS stocké | Commentaire malveillant échappé par Twig | `/comments` | `VulnerabilityTest.php` |
+| Protection CSRF | Origine étrangère, données inchangées après refus et suppression manuelle | `/account/edit`, `/account/delete` | `CsrfProtectionTest.php` |
+| Déconnexion | POST, jeton CSRF, invalidation de session et parcours depuis la page de connexion | `/logout`, `/login` | `LogoutControllerTest.php` |
+| Unicité de l’email | Inscription et modification du profil sans altérer un autre compte | `/register`, `/account/edit` | `EmailUniquenessTest.php` |
+| Injection SQL | Charge utile envoyée au formulaire de connexion ; preuve à renforcer | `/login` | `VulnerabilityTest.php` |
+| XSS stockée | Commentaire malveillant échappé par Twig | `/comments` | `VulnerabilityTest.php` |
 | IDOR et énumération | Accès à la commande d'un autre utilisateur, puis masquage de son existence | `/orders/{id}` | `VulnerabilityTest.php`, `SecurityRegressionTest.php` |
 | Résistance | Honeypot, question CAPTCHA, RateLimiter et login throttling | `/contact`, `/login` | `AttackResistanceTest.php` |
 | Régression | Protections critiques conservées dans le temps | Routes sensibles | `SecurityRegressionTest.php` |
 
 ## Choix pédagogiques
 
-### Une application sécurisée, pas un musée des horreurs
+### Des protections à observer et des limites explicites
 
 Les charges utiles telles que :
 
@@ -49,7 +56,7 @@ Les charges utiles telles que :
 ```
 
 sont envoyées aux fonctionnalités réelles de l'application, mais le code livré
-reste sécurisé :
+met en œuvre les protections suivantes, dans les limites décrites plus bas :
 
 - Doctrine paramètre les requêtes utilisées pour l'authentification ;
 - Twig échappe les commentaires ;
@@ -117,18 +124,62 @@ réponses. Il vérifie aussi l'absence de la référence confidentielle `SEC-002
 Cette comparaison couvre ces réponses HTML ; elle ne démontre pas l'absence
 de tout indice temporel ou de toute divulgation par une autre route.
 
-### Deux comportements CSRF à connaître
+### CSRF : distinguer les mécanismes et leurs effets
 
-Le cours présente souvent `403 Access Denied` comme résultat attendu. Dans une
-application Symfony actuelle, il faut distinguer deux cas :
+| Action | Contrôle dans cette application | Résultat d'une demande refusée |
+| --- | --- | --- |
+| Modification du profil | Formulaire avec CSRF sans état : origine et, selon le parcours, double soumission | `422`, erreur de formulaire |
+| Suppression du compte | Jeton avec état lié à `delete-account-{id}` | `403` |
+| Déconnexion | POST et jeton avec état lié à `logout` | GET : `405` ; POST sans jeton valable : `403` |
 
-- un `FormType` avec un token invalide rend le formulaire invalide ; ce projet
-  renvoie alors `422 Unprocessable Entity` ;
-- une action manuelle qui appelle `isCsrfTokenValid()` peut lever explicitement
-  une erreur `403 Access Denied`.
+Dans `config/packages/csrf.yaml`, les identifiants `submit` et `authenticate`
+restent sans état. `logout` a été retiré de cette liste pour utiliser un jeton
+de session.
 
-Les tests montrent les deux comportements. C'est plus précis et beaucoup plus
-utile en entreprise.
+Le test de modification du profil transmet explicitement une origine étrangère,
+tout en conservant la valeur CSRF du formulaire. Il vérifie le refus, puis
+l'absence de modification de l'email et du prénom en base. Un cas autorisé
+vérifie que les nouvelles valeurs sont effectivement enregistrées.
+
+Les adresses `https://127.0.0.1:8000` et `https://127.0.0.1:9000` représentent
+deux origines différentes. BrowserKit simule ces requêtes : aucun serveur
+supplémentaire n'est nécessaire sur le port 9000 pour exécuter ces tests.
+
+Le maintien de l'authentification après la modification de profil refusée
+n'est pas vérifié par ce chantier ; voir les limites connues.
+
+Pour la suppression, les tests couvrent l'absence de jeton, un jeton inventé,
+un vrai jeton de déconnexion utilisé pour la mauvaise action et un jeton valide.
+Ils vérifient les données et l'accès au compte après la requête.
+
+### Déconnexion protégée
+
+La route `/logout` accepte uniquement POST. La navigation fournit un formulaire
+contenant `_token={{ csrf_token('logout') }}`. Symfony vérifie ce jeton et
+invalide la session lors de la déconnexion.
+
+Le lien GET résiduel de la page `/login` a été supprimé. Cette page invite
+désormais à utiliser le bouton Déconnexion de la navigation.
+`testLogoutFromLoginPageWorks()` couvre ce parcours.
+
+Les tests vérifient également qu'une demande de déconnexion refusée conserve
+l'authentification et qu'après une déconnexion valide, les anciens cookies ne
+rétablissent pas l'accès dans l'environnement de test.
+
+La suppression du compte conserve `$security->logout(false)` : elle a déjà
+contrôlé son propre jeton CSRF. Cet appel interne n'affaiblit pas le contrôle
+de la route publique `/logout`.
+
+### Session et rejeu de cookie
+
+Le TP de session montre qu'un cookie de session valide, copié volontairement
+entre les clients du laboratoire, peut permettre de réutiliser l'identité
+associée à cette session.
+
+`HttpOnly`, `Secure` et `SameSite` réduisent certains risques de lecture ou
+de transmission ; ils n'empêchent pas à eux seuls le rejeu d'un identifiant de
+session déjà obtenu et encore valide. La déconnexion doit rendre l'ancienne
+session inutilisable côté serveur.
 
 ### Login throttling et code HTTP 429
 
@@ -137,19 +188,37 @@ repasse par le mécanisme d'échec d'authentification, généralement avec une
 redirection vers `/login`.
 
 Le formulaire `/contact`, lui, utilise directement une `RateLimiterFactory` et
-renvoie explicitement :
-
-```text
-429 Too Many Requests
-Retry-After: 60
-```
+renvoie explicitement `429 Too Many Requests`, avec un en-tête `Retry-After`
+calculé selon le temps restant avant une nouvelle tentative autorisée.
 
 Les étudiants observent ainsi les deux stratégies.
 
 La question « 3 + 4 » du formulaire de contact sert uniquement à tester un
 challenge valide ou invalide sans clé API. Ce n'est pas un CAPTCHA de production.
-Une application réelle utilisera par exemple Cloudflare Turnstile ou un service
-équivalent, toujours avec une validation côté serveur.
+Les protections contre les abus doivent être adaptées au contexte d'une application réelle.
+
+## Les cinq chantiers issus de l'audit
+
+| Chantier | Amélioration intégrée | Preuve recherchée |
+| --- | --- | --- |
+| 1. XSS stockée | Marqueur unique, relecture en base et consultation par Alice | Le commentaire publié est celui analysé ; son texte est conservé et sa charge n'est pas transformée en élément `script` |
+| 2. Rôle forgé | Origine cohérente, cas normal et vérification exacte des erreurs | Le champ supplémentaire explique seul le refus ; aucun compte n'est créé |
+| 3. Déconnexion | POST, CSRF avec état, invalidation et suppression du lien GET résiduel | Les demandes illégitimes échouent ; la déconnexion normale retire l'accès |
+| 4. CSRF et données | Relecture après `clear()`, cas refusés et cas autorisés | Les refus conservent les données ; les demandes autorisées produisent l'effet attendu |
+| 5. Email déjà utilisé | `UniqueEntity` sur `User`, contrainte SQL conservée | Erreur de formulaire compréhensible, comptes inchangés et conservation de son propre email autorisée |
+
+L'inscription et la modification du profil restent liées à l'entité `User`.
+Aucun DTO ni appel à `refresh()` n'est conservé dans le parcours de modification
+du compte. Le trait `tests/Support/CreatesUsers.php` fournit les comptes créés
+pour les tests concernés.
+
+Le point central du parcours est de distinguer :
+- la réponse HTTP ;
+- la cause exacte d'un refus ;
+- les données effectivement enregistrées ;
+- l'état de l'authentification lorsque le test le contrôle.
+
+Un statut d'erreur seul ne prouve pas qu'aucune donnée n'a changé.
 
 ## Prérequis
 
@@ -164,7 +233,7 @@ Vérification :
 ```bash
 php -v
 composer -V
-symfony -V
+symfony version
 mysql --version
 git --version
 ```
@@ -202,16 +271,24 @@ Le projet utilise notamment :
 Créez un fichier `.env.local` :
 
 ```dotenv
-APP_SECRET="une-cle-locale-longue-et-aleatoire"
 DATABASE_URL="mysql://root:@127.0.0.1:3306/symfony_tests_securite?serverVersion=8.4.7&charset=utf8mb4"
 ```
 
 Adaptez l'utilisateur, le mot de passe et `serverVersion` à votre installation.
-Avec MySQL 9.1, utilisez par exemple `serverVersion=9.1.0`.
+Le secret de développement fourni est réservé au laboratoire. Pour le remplacer,
+utilisez `.env.dev.local`, chargé après `.env.dev` :
 
-Ne placez jamais un secret de production dans `.env`.
+```dotenv
+APP_SECRET="remplacer-par-une-valeur-aleatoire-locale"
+```
+
+Les fichiers `.env.local`, `.env.dev.local` et `.env.test.local` sont ignorés par
+Git. Ne placez jamais de secret de production dans un fichier versionné.
 
 ### 4. Créer et préparer la base de développement
+
+Ces commandes concernent uniquement la base locale du laboratoire.
+**Le chargement des fixtures purge les données existantes de la base ciblée.**
 
 ```bash
 php bin/console doctrine:database:create
@@ -233,16 +310,15 @@ Puis ouvrez l'URL indiquée, généralement :
 https://127.0.0.1:8000
 ```
 
-### Alternative Docker pour MySQL
+### Docker : configuration à reprendre
 
-Si aucun serveur MySQL local n'est lancé :
+Le fichier `compose.yaml` configure actuellement **PostgreSQL 16**, alors que
+le parcours local documenté et la vérification finale utilisent **MySQL**.
+Il ne constitue donc pas une alternative MySQL prête à l'emploi.
 
-```bash
-docker compose up -d database
-```
-
-Le conteneur expose MySQL sur le port `3306`. Ne le démarrez pas si WampServer
-utilise déjà ce port.
+La cohérence entre Compose, la connexion Doctrine et les migrations doit être
+traitée avant d'utiliser réellement cet environnement. Le parcours décrit ici
+utilise le serveur MySQL local.
 
 ## Comptes de démonstration
 
@@ -260,12 +336,29 @@ Password123!
 
 ## Préparer la base de test
 
-Doctrine ajoute automatiquement le suffixe `_test`. La base utilisée par
-PHPUnit se nomme donc :
+PHPUnit impose `APP_ENV=test`. Le fichier `.env.test` fournit la connexion de
+test ; `.env.local` n'est pas chargé dans cet environnement.
+
+Si vos identifiants MySQL diffèrent des valeurs du dépôt, créez `.env.test.local` :
+
+```dotenv
+DATABASE_URL="mysql://utilisateur:mot-de-passe@127.0.0.1:3306/symfony_tests_securite?serverVersion=8.4.7&charset=utf8mb4"
+```
+
+Adaptez les valeurs à votre installation et encodez les caractères réservés du
+mot de passe dans l'URL. Les variables d'environnement du processus restent
+prioritaires sur les fichiers dotenv.
+
+Doctrine ajoute automatiquement le suffixe `_test` (complété par `TEST_TOKEN`
+si défini). Avec la configuration fournie et sans `TEST_TOKEN`, la base se nomme :
 
 ```text
 symfony_tests_securite_test
 ```
+
+Avant toute préparation, vérifiez la base réellement ciblée. N’utilisez pas une
+base contenant des données à conserver. Ne rajoutez pas `_test` au nom de base
+dans l’URL si le suffixe Doctrine est conservé.
 
 Préparation :
 
@@ -292,7 +385,7 @@ Tous les tests :
 php bin/phpunit
 ```
 
-Uniquement les tests de sécurité :
+Les classes placées dans `tests/Security` (la déconnexion se trouve dans `tests/Controller`) :
 
 ```bash
 php bin/phpunit tests/Security
@@ -307,6 +400,8 @@ php bin/phpunit tests/Security/CsrfProtectionTest.php
 php bin/phpunit tests/Security/VulnerabilityTest.php
 php bin/phpunit tests/Security/AttackResistanceTest.php
 php bin/phpunit tests/Security/SecurityRegressionTest.php
+php bin/phpunit tests/Security/EmailUniquenessTest.php
+php bin/phpunit tests/Controller/LogoutControllerTest.php
 ```
 
 Uniquement le groupe des tests de régression :
@@ -328,6 +423,20 @@ php bin/phpunit --testdox tests/Security
 ```
 
 ## Travaux pratiques proposés
+
+Les six ateliers ci-dessous conservent la numérotation historique du README.
+Le support d’audit détaillé utilise un autre découpage :
+
+| TP du support d’audit | Sujet |
+| --- | --- |
+| TP1 | IDOR, énumération et masquage de l’existence des commandes |
+| TP2 | Tentative de XSS stockée |
+| TP3 | CSRF : jetons et requête d’une autre origine |
+| TP4 | Réutilisation d’un cookie de session dans le laboratoire |
+| TP5 | Manipulation des requêtes HTTP |
+
+Les cinq chantiers de fiabilisation prolongent ces TP. Les exercices sur les
+limiteurs restent disponibles, sans être considérés comme entièrement fiabilisés.
 
 ### TP 1 - Contrôler les accès
 
@@ -358,10 +467,17 @@ Exemple JSON :
 
 ### TP 3 - Tester le CSRF
 
-1. Inspecter le champ `_token` de `/account/edit`.
-2. Le remplacer par `hack`.
-3. Envoyer `POST /account/delete` sans token.
-4. Comparer les réponses `422` et `403`.
+1. Inspecter le champ `account[_token]` de `/account/edit`.
+2. Étudier le test d’origine étrangère, qui conserve la valeur du formulaire
+   mais transmet des en-têtes `Origin` et `Referer` étrangers.
+3. Vérifier le `422`, le message CSRF et les données inchangées en base.
+4. Vérifier qu’une demande normale modifie effectivement le profil.
+5. Envoyer `POST /account/delete` sans jeton, avec un jeton inventé, puis avec
+   un vrai jeton destiné à la déconnexion : attendre `403` et un compte conservé.
+6. Vérifier la suppression autorisée avec le jeton propre au compte.
+
+Remplacer arbitrairement le jeton par `hack` ne suffit pas à expliquer les
+contrôles CSRF sans état utilisés pour le formulaire de profil.
 
 ### TP 4 - Tester SQLi, XSS et IDOR
 
@@ -399,7 +515,7 @@ ses TP2 et TP3.
 
 ### TP 6 - Tester les régressions de sécurité
 
-Un test de non-régression garantit qu'une protection déjà validée reste active
+Un test de non-régression vérifie qu'une protection déjà validée reste active
 après une correction, un refactoring ou une mise à jour. Techniquement, il
 s'agit d'un test PHPUnit ordinaire conservé comme preuve d'un comportement de
 sécurité attendu.
@@ -446,7 +562,7 @@ sécurité attendu.
    php bin/phpunit
    ```
 
-8. Étudier enfin `testManualActionAcceptsValidCsrfToken()` dans
+8. Étudier enfin `testValidDeletionRemovesAccountAndLogsOut()` dans
    `CsrfProtectionTest.php`. Ce test empêche le retour du bug où le compte était
    supprimé, mais où l'ancien utilisateur restait présent dans le token de
    sécurité pendant la redirection.
@@ -473,7 +589,9 @@ tests-securite/
 │   │   ├── ApiRegistrationController.php
 │   │   ├── CommentController.php
 │   │   ├── ContactController.php
-│   │   └── PurchaseOrderController.php
+│   │   ├── PurchaseOrderController.php
+│   │   ├── RegistrationController.php
+│   │   └── SecurityController.php
 │   ├── DataFixtures/AppFixtures.php
 │   ├── Entity/
 │   │   ├── Comment.php
@@ -484,6 +602,8 @@ tests-securite/
 │   ├── Repository/
 │   └── Security/Voter/PurchaseOrderVoter.php
 ├── templates/
+│   ├── base.html.twig
+│   ├── security/login.html.twig
 │   └── bundles/TwigBundle/Exception/error404.html.twig
 └── tests/
     ├── Controller/LogoutControllerTest.php
@@ -491,9 +611,9 @@ tests-securite/
     │   ├── AccessControlTest.php
     │   ├── AttackResistanceTest.php
     │   ├── CsrfProtectionTest.php
+    │   ├── EmailUniquenessTest.php
     │   ├── InputValidationTest.php
     │   ├── SecurityRegressionTest.php
-    │   ├── UserEntityTest.php
     │   └── VulnerabilityTest.php
     ├── Support/CreatesUsers.php
     └── bootstrap.php
@@ -507,10 +627,88 @@ tests-securite/
   dans l'URL.
 - N'utilisez pas `|raw` sur un contenu saisi par un utilisateur.
 - Chaque vulnérabilité corrigée doit produire un test de régression.
-- Si un test de sécurité échoue, on corrige la protection ; on ne supprime pas
-  le test. Oui, même s'il a choisi le vendredi à 17 h 58 pour se manifester.
+- Si un test échoue, identifier la cause avant de modifier le code ou les assertions.
+  Une réduction volontaire du périmètre doit être documentée avec le problème
+  connu ; elle ne constitue pas sa correction.
+
+## Vérification finale et traçabilité
+
+La vérification locale rapportée par Codex le **30 septembre 2026** concerne
+le commit [`baa2daeeb72bfe286f8812c5cb5d05eb5d860d10`](https://github.com/StephaneBouret/tests-securite/commit/baa2daeeb72bfe286f8812c5cb5d05eb5d860d10).
+
+Environnement rapporté : PHP 8.4.15, PHPUnit 13.2.6,
+base `symfony_tests_securite_test` sur `127.0.0.1:3306`.
+Le nom réel de la base et l'index SQL unique `UNIQ_IDENTIFIER_EMAIL`
+ont été contrôlés avant l'exécution.
+
+| Exécution sur ce commit | Résultat rapporté |
+| --- | --- |
+| Sélection des tests des chantiers et de non-régression | 28 tests, 198 assertions : succès |
+| Suite complète | 37 tests, 246 assertions : succès |
+
+Cette vérification a confirmé les preuves dans leur périmètre et identifié un
+lien GET de déconnexion résiduel dans la page de connexion : le serveur le
+refusait en `405`, sans déconnecter l'utilisateur.
+
+Le commit [`5c5beda6ba01ebf645eff7cff724c568ebfd7a3f`](https://github.com/StephaneBouret/tests-securite/commit/5c5beda6ba01ebf645eff7cff724c568ebfd7a3f)
+supprime ce lien et ajoute `testLogoutFromLoginPageWorks()`.
+
+**Les chiffres ci-dessus décrivent l'exécution antérieure au correctif.**
+Aucun nouveau résultat d'exécution après ce correctif n'est consigné ici.
+Pour vérifier la version corrigée :
+
+```bash
+php bin/phpunit tests/Controller/LogoutControllerTest.php
+php bin/phpunit
+git diff --check
+```
+
+Cette traçabilité ne constitue pas une certification de sécurité. Elle distingue
+le code corrigé et versionné des tests dont l'exécution est effectivement rapportée.
+
+## Limites connues et travaux différés
+
+| Sujet | État et suite envisagée |
+| --- | --- |
+| Profil invalide et authentification | Le formulaire peut modifier l'email de l'objet utilisateur en mémoire sans l'enregistrer. La différence avec la base peut entraîner une perte d'authentification à la requête suivante. Problème connu et différé ; le test CSRF de profil porte sur le refus et la conservation des données. |
+| Email et demandes simultanées | `UniqueEntity` améliore le traitement des demandes séquentielles. La contrainte SQL reste indispensable ; une collision concurrente peut encore produire une exception non traitée. |
+| Connexion avec charge SQL | Le refus observé doit être mieux étayé par une connexion normale, la vérification de sa cause et l'absence d'authentification après la tentative. |
+| Limiteurs | Isoler leur état et vérifier précisément les seuils. Des exécutions rapprochées peuvent partager un état de limitation ; une suite verte ne clôture pas ce sujet. |
+| Commentaires | Pagination et limitation des publications à traiter lors du travail sur les volumes et les abus. |
+| Déploiement et Docker | Réconcilier la configuration PostgreSQL de Compose avec le parcours MySQL avant usage ; aucun déploiement de production validé par ce cours. |
+| UUID | Réservés à la formation Symfony ; ils ne remplacent pas le contrôle d'autorisation. |
+
+### Portée des tests automatisés
+
+- BrowserKit et DomCrawler analysent les réponses sans exécuter le JavaScript
+  d'un navigateur réel.
+- Le test XSS vérifie la persistance et le HTML du commentaire ciblé ; il ne
+  démontre pas à lui seul le comportement de toutes les charges dans un navigateur.
+- Les en-têtes d'origine transmis par les tests vérifient la réaction du serveur,
+  pas toutes les règles d'envoi des cookies d'un navigateur réel.
+- Les contrôles de rejeu après déconnexion concernent les sessions de test
+  Symfony, pas un stockage de session de production.
+- Les tests utilisant `loginUser()` préparent une authentification ; ils ne
+  reproduisent pas le parcours complet de connexion.
+- Le masquage IDOR compare le statut, le type de contenu et le HTML public.
+  Il ne démontre pas une indistinguabilité temporelle.
+
+Les tests créent ou suppriment des données dans la base dédiée. Des comptes et
+commentaires de test peuvent subsister entre les exécutions ; les adresses et
+marqueurs uniques limitent les collisions, sans constituer un nettoyage automatique.
+
+## Démarche pédagogique
+
+Pour chaque scénario, préciser l'état initial, la requête, la règle attendue,
+la cause du refus et l'état des données après la réponse. Vérifier également
+qu'une demande autorisée reste possible.
+
+L'IA aide à proposer des scénarios, analyser le code et rédiger des tests.
+Ses conclusions doivent être confrontées aux preuves observées et aux limites
+du périmètre. Le prochain travail porte sur les fondamentaux HTTP : méthodes,
+en-têtes, statuts, redirections, cookies et sessions.
 
 ## Licence et usage
 
-Projet conçu comme support de formation. Adaptez librement les exercices à
-votre progression pédagogique et à vos groupes.
+Projet conçu comme support de formation. `composer.json` déclare une licence
+`proprietary` ; ce README n’accorde pas de licence supplémentaire.
